@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 class DynamicDatabase:
-    def __init__(self, contigs_path, reference_seq_path , ani_threshold, query_coverage_threshold, ref_coverage_threshold, output_folder,threads):
+    def __init__(self, contigs_path, reference_seq_path, ani_threshold, query_coverage_threshold, ref_coverage_threshold, output_folder, threads):
         self.contigs_path = contigs_path
         self.reference_seq_path = reference_seq_path
         self.ani_threshold = ani_threshold
@@ -22,7 +22,7 @@ class DynamicDatabase:
         self.ref_coverage_threshold = ref_coverage_threshold
         self.output_folder = output_folder
         self.threads = threads
-        self.refseq_ids = []
+
         # Initialize pipeline
         self.initialize_pipeline()
 
@@ -48,8 +48,8 @@ class DynamicDatabase:
         print(f"Fetching {len(remaining_genome_ids)} refseq ids...")
 
         start_time = time.time()
-        refseq_ids = self.get_refseq_assembly_ids(remaining_genome_ids,num_threads=10,batch_size=100)
-        self.refseq_ids = refseq_ids
+        refseq_ids = self.get_refseq_assembly_ids(remaining_genome_ids,num_threads=4,batch_size=150)
+
         print(refseq_ids)
         elapsed_time_1 = time.time() - start_time
 
@@ -240,8 +240,8 @@ class CHECKM:
         self.output_folder = output_folder
 
     def run_checkm(self):
-        command = ['checkm', 'lineage_wf', self.output_folder, self.output_folder, '-t', str(self.num_threads), '-x',
-                   'fasta', '--pplacer_threads', '64']
+        command = ['checkm2', 'predict', '-i', self.output_folder, '-o', self.output_folder, '-t', str(self.num_threads), '-x',
+                   'fasta']
 
         with open(f"{self.output_folder}/checkm.txt", "w") as outfile:
             subprocess.run(command, stdout=outfile, check=True)
@@ -267,11 +267,11 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--ani', type=int, default=95, help='ANI cutoff.'
                                                                   ' Default is 95.')
 
-    parser.add_argument('-q', '--querycoverage', type=int, default=80,
+    parser.add_argument('-q', '--querycoverage', type=float, default=80,
                         help='Minimum query coverage for ANI calculation.'
                              ' Default is 80')
 
-    parser.add_argument('-c', '--refcoverage', type=int, default=80,
+    parser.add_argument('-c', '--refcoverage', type=float, default=80,
                         help='Minimum reference coverage for ANI calculation.'
                              ' Default is 80')
 
