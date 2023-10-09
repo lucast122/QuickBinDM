@@ -10,7 +10,7 @@ QuickBinDM is a bioinformatics pipeline designed to efficiently perform metageno
 Clone the repository to your local machine:
 
 ```bash
-git clone https://github.com/your_username/QuickBinDM.git
+git clone https://github.com/lucast122/QuickBinDM.git
 ```
 
 ## Requirements
@@ -53,8 +53,4 @@ python quickbindm.py -i input_contigs.fasta -r reference_seqs.fasta -o output/ -
 
 ## Contributors
 
-- Your Name (your@email.com)
-
-## License
-
-This project is licensed under the MIT License.
+-  (timo-niklas.lucas@uni-tuebingen.de)
