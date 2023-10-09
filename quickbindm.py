@@ -14,13 +14,15 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 class DynamicDatabase:
-    def __init__(self, contigs_path, reference_seq_path , ani_threshold, query_coverage_threshold, output_folder):
+    def __init__(self, contigs_path, reference_seq_path , ani_threshold, query_coverage_threshold, ref_coverage_threshold, output_folder,threads):
         self.contigs_path = contigs_path
         self.reference_seq_path = reference_seq_path
         self.ani_threshold = ani_threshold
         self.query_coverage_threshold = query_coverage_threshold
+        self.ref_coverage_threshold = ref_coverage_threshold
         self.output_folder = output_folder
-
+        self.threads = threads
+        self.refseq_ids = []
         # Initialize pipeline
         self.initialize_pipeline()
 
@@ -45,24 +47,30 @@ class DynamicDatabase:
 
         print(f"Fetching {len(remaining_genome_ids)} refseq ids...")
 
-        # start_time = time.time()
-        # refseq_ids = get_refseq_assembly_ids(remaining_genome_ids,num_threads=4,batch_size=(int(len(remaining_genome_ids)/4))
-        # elapsed_time_1 = time.time() - start_time
-        #
-        # print(f"Time for fetching refseq ids:  {elapsed_time_1}")
-        # print(f"Bulk downloading genomes using 10 threads...")
-        #
-        # start_time = time.time()
-        # download_proteins_for_refseq_assembly_ids(refseq_ids, args.output_folder, num_threads=4)
-        # elapsed_time_2 = time.time() - start_time
-        # print(f"Time for fetching proteins: {elapsed_time_2}")
+        start_time = time.time()
+        refseq_ids = self.get_refseq_assembly_ids(remaining_genome_ids,num_threads=10,batch_size=100)
+        self.refseq_ids = refseq_ids
+        print(refseq_ids)
+        elapsed_time_1 = time.time() - start_time
+
+        print(f"Time for fetching refseq ids:  {elapsed_time_1}")
+        print(f"Bulk downloading genomes using 10 threads to {self.output_folder}...")
+
+        start_time = time.time()
+        self.download_proteins_for_refseq_assembly_ids(refseq_ids, self.output_folder, num_threads=10)
 
 
-        protein_sequences_path = f"{self.output_folder}/proteins/concatenated.fasta"
+        elapsed_time_2 = time.time() - start_time
+        print(f"Time for fetching proteins: {elapsed_time_2}")
+
+
+
 
 
         # Extract files
         self.extract_files_in_directory(self.output_folder)
+
+        protein_sequences_path = f"{self.output_folder}/proteins/concatenated.fasta"
 
         # Concatenate fasta
         self.concatenate_fasta(f"{self.output_folder}/proteins/ncbi_dataset/data/", protein_sequences_path)
@@ -83,7 +91,10 @@ class DynamicDatabase:
         df = pd.read_csv(f"{self.output_folder}/contigs_vs_refseq.txt", sep='\t')
         filtered_df = df[
             (df['ANI'] >= self.ani_threshold) &
-            (df['Align_fraction_query'] >= self.query_coverage_threshold)
+            (df['Align_fraction_query'] >= self.query_coverage_threshold) &
+            (df['Align_fraction_ref'] >= self.ref_coverage_threshold)
+
+
             ]
         return filtered_df['Ref_name'].unique()
 
@@ -133,12 +144,12 @@ class DynamicDatabase:
         else:
             print(f"Failed to retrieve data for {refseq_assembly_id}: {response.status_code}")
 
-    def download_proteins_for_refseq_assembly_ids(self,refseq_assembly_ids, output_folder, num_threads=4):
+    def download_proteins_for_refseq_assembly_ids(self,refseq_assembly_ids, output_folder, num_threads):
         # Ensure the output directory exists
         os.makedirs(output_folder, exist_ok=True)
 
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
-            executor.map(lambda refseq_assembly_id: download_protein(refseq_assembly_id, output_folder),
+            executor.map(lambda refseq_assembly_id: self.download_protein(refseq_assembly_id, output_folder),
                          refseq_assembly_ids)
 
     def download_proteins_for_refseq_assembly_id(self,refseq_assembly_id, output_folder):
@@ -180,8 +191,8 @@ class DynamicDatabase:
         # Create a ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             # Use the executor.map method to execute fetch_batch on each batch of ids
-            list(executor.map(lambda batch: fetch_batch(batch, results), batches))
-
+            list(executor.map(lambda batch: self.fetch_batch(batch, results), batches))
+        # print(results)
         return results
 
     # wrapper function
@@ -202,24 +213,25 @@ class DIAMOND:
 
     def align(self):
         command = ['diamond', 'blastx', '-q', self.query_file, '-d', self.database, '-p', f"{self.threads}", "-o",
-                   f"{self.out}/contigs_vs_dynamic_db.daa", "-f100",  "--long-reads", '-c1', '-b12', '-t', '/dev/shm/']
+                   f"{self.out}/contigs_vs_dynamic_db.daa", "-f100",  "--long-reads", '-t', '/dev/shm/']
         subprocess.run(command, check=True)
 
 
 class MEGAN:
-    def __init__(self, output_folder, daa_file, mapping_file):
+    def __init__(self, output_folder, daa_file, mapping_file,threads):
         self.output_folder = output_folder
         self.daa_file = daa_file
         self.mapping_file = mapping_file
+        self.threads = threads
 
 
     def meganize(self):
-        command = ['daa-meganizer', '-i', self.daa_file, '-mdb', self.mapping_file, '-lg']
+        command = ['/home/minion-computer/megan/tools/daa-meganizer', '-i', self.daa_file, '-mdb', self.mapping_file, '-lg', '-t', f"{self.threads}"]
         subprocess.run(command, check=True)
 
 
     def bin_and_correct(self):
-        command = ['read-extractor', '-i', self.daa_file, '-c', 'Taxonomy', '-o', '%t.fasta', '-fsc']
+        command = ['/home/minion-computer/megan/tools/read-extractor', '-i', self.daa_file, '-c', 'Taxonomy', '-o', f'{self.output_folder}/%t.fasta', '-fsc']
         subprocess.run(command, check=True)
 
 class CHECKM:
@@ -255,8 +267,12 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--ani', type=int, default=95, help='ANI cutoff.'
                                                                   ' Default is 95.')
 
-    parser.add_argument('-c', '--querycoverage', type=int, default=80,
+    parser.add_argument('-q', '--querycoverage', type=int, default=80,
                         help='Minimum query coverage for ANI calculation.'
+                             ' Default is 80')
+
+    parser.add_argument('-c', '--refcoverage', type=int, default=80,
+                        help='Minimum reference coverage for ANI calculation.'
                              ' Default is 80')
 
     args = parser.parse_args()
@@ -268,10 +284,11 @@ if __name__ == "__main__":
     # Initialize dynamic database class with skani file and thresholds
     print("Creating dynamic DB...")
 
-    dyn_db = DynamicDatabase(args.input_contigs, args.reference_seqs, args.ani, args.querycoverage,args.output_folder)
+    dyn_db = DynamicDatabase(args.input_contigs, args.reference_seqs, args.ani, args.querycoverage, args.refcoverage, args.output_folder, args.threads)
     # dyn_db.extract_remaining_genomes(args.reference_seqs, args.output_folder)
     # dyn_db.extract_remaining_genomes_parallel(args.reference_seqs, args.output_folder, n_threads=args.threads)
     print("Filtering references using skani ANI results...")
+
 
 
 
@@ -282,7 +299,13 @@ if __name__ == "__main__":
     diamond.align()
 
     # Run MEGAN binning and frame-shift correction
-    megan = MEGAN(args.output_folder,f"{args.output_folder}/contigs_vs_dynamic_db.daa", f"{args.output_folder}/megan-map-Feb2022-ue.db")
+    megan = MEGAN(args.output_folder,f"{args.output_folder}/contigs_vs_dynamic_db.daa", "megan-map-Feb2022-ue.db", args.threads)
+    megan.meganize()
     megan.bin_and_correct()
+
+    checkm = CHECKM(args.output_folder, args.threads)
+    checkm.run_checkm()
+
+
 
     print("Pipeline completed.")
